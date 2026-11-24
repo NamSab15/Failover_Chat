@@ -14,14 +14,16 @@ failover and response caching.
 
 ## 1. Live URLs
 
-Fill these in after deploying (see `docs/deployment.md` for step-by-step
-instructions — the stack is designed to deploy in minutes on free tiers):
-
 | Tier | URL |
 | --- | --- |
-| Frontend (React) | `<YOUR-FRONTEND-URL>` e.g. https://your-app.vercel.app |
-| Backend (FastAPI) | `<YOUR-BACKEND-URL>` e.g. https://your-backend.onrender.com |
-| Health check | `<YOUR-BACKEND-URL>/health` |
+| Frontend (React, Vercel) | https://failoverchat.vercel.app |
+| Backend (FastAPI, Render) | https://failover-chat.onrender.com |
+| Health check | https://failover-chat.onrender.com/health |
+
+> The backend runs on Render's free plan, which sleeps after ~15 minutes idle;
+> the first request after that can take ~50 seconds while it wakes up. Chat
+> history survives restarts but is reset on redeploys (no persistent disk on
+> the free plan). See `docs/deployment.md` for the deployment steps.
 
 > The deployed backend is started with `ENABLE_FAILURE_SIMULATION=true`, so the
 > `X-Simulate-Failure` failover hook is testable against the live URL without
