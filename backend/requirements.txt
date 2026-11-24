@@ -1,0 +1,6 @@
+fastapi==0.128.0
+uvicorn[standard]==0.44.0
+litellm==1.110.3
+orjson==3.13.0  # imported by litellm's cache-hit path, not declared by litellm
+soundfile==0.14.0  # imported by litellm's cache-hit path (litellm.proxy pass-through), not declared by litellm
+pydantic-settings==2.16.3

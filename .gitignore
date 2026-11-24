@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# Environment & secrets
+.env
+.env.local
+*.env.local
+
+# Local databases
+*.db
+*.db-wal
+*.db-shm
+app.db*
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Coverage / build artifacts
+htmlcov/
+.coverage
+
+# Original source archive (kept locally as a backup)
+*.zip
