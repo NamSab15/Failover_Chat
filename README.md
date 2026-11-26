@@ -75,7 +75,7 @@ VITE_API_BASE_URL=http://localhost:8000 npm run dev   # http://localhost:3000
 cd backend && python -m pytest        # or: make test
 ```
 
-45 tests cover the API contract, validation, failover (real HTTP 429/5xx via an
+48 tests cover the API contract, validation, failover (real HTTP 429/5xx via an
 OpenAI-compatible stub server), cache labeling/latency, multi-turn context,
 token accounting, history persistence across restarts and the
 `X-Simulate-Failure` hook. No real API keys are needed to run them.
@@ -104,24 +104,31 @@ token accounting, history persistence across restarts and the
 
 ### Caching
 
-- LiteLLM's built-in cache is enabled globally
-  (`litellm.cache = Cache(type="local")`, in-memory) and each call passes
-  `caching=True`. The cache key is derived from **model + the full message list
-  sent to the LLM** (system prompt + history + new message) — exactly the spec's
-  rule. LiteLLM does not include credentials in the cache key, so the same
-  conversation text always hits the same entry regardless of which key serves
-  it (verified by tests).
-- A hit returns the identical stored reply **and the usage stored with it**;
-  the backend then reports `resolution_source="LLM_CACHE"`, `key_id=null`,
-  `fallback_attempts=0`. Latency is measured per request at the route level, so
-  cache hits (single dict lookup, ~1–50 ms) are visibly faster than live calls.
-- A different message (or different history — e.g. the same text asked again
-  inside the same session) produces a different cache key and can never come
-  from the cache.
-- Requests carrying `X-Simulate-Failure` bypass the cache entirely
-  (`caching=False`): the hook exists to demonstrate *live* failover, and a
-  cache short-circuit would hide it (and would make `*=429` return a cached
-  200 instead of the specified 503).
+- Every answered question is cached in LiteLLM's built-in cache
+  (`Cache(type="local")`, in-memory, owned by the gateway). The cache key is
+  LiteLLM's hash of **model + system prompt + the normalized question**
+  (lowercased, whitespace collapsed, trailing `?`/`!`/`.` dropped), **not** the
+  whole conversation history. So a question that was answered once is served
+  from the cache whenever it is asked again: later in the same session, after
+  other turns, or in any other session with the same system prompt.
+  Credentials are never part of the key, so the entry is shared regardless of
+  which key produced it (verified by tests).
+- A hit returns the identical stored reply **and the usage stored with it**,
+  makes no LLM call, and reports `resolution_source="LLM_CACHE"`,
+  `key_id=null`, `fallback_attempts=0`. Latency is measured per request at the
+  route level, so cache hits (single dict lookup, ~1–50 ms) are visibly faster
+  than live calls. Cached replies are still saved to the session history.
+- A different question, or the same question under a different system prompt,
+  is a different cache entry and goes to live inference.
+- Trade-off: because history is not part of the key, a context-dependent
+  follow-up such as "what about the second one?" reuses whatever answer was
+  first given to that exact wording.
+- Requests carrying `X-Simulate-Failure` bypass the cache entirely (no read, no
+  write): the hook exists to demonstrate *live* failover, and a cache
+  short-circuit would hide it (and would make `*=429` return a cached 200
+  instead of the specified 503).
+- `CACHE_TTL_SECONDS=0` keeps entries for the lifetime of the process; the
+  cache is in-memory, so a backend restart or redeploy empties it.
 
 ### SQLite session storage
 
@@ -171,13 +178,17 @@ curl -s -X POST $BASE/chat -H 'Content-Type: application/json' \
 # input_tokens/output_tokens are for THIS request only
 ```
 
-**Cache hit** — send the same first message in a *new* session:
+**Cache hit**: ask the same question again, in a *new* session or later in
+the same one (case and trailing punctuation don't matter):
 
 ```bash
 curl -s -X POST $BASE/chat -H 'Content-Type: application/json' \
-  -d '{"session_id":"demo-2","message":"What is the capital of France?"}'
+  -d '{"session_id":"demo-2","message":"what is the capital of france"}'
 # metadata.resolution_source = "LLM_CACHE", key_id = null, fallback_attempts = 0,
 # identical reply text, same stored usage, latency_ms much smaller
+curl -s -X POST $BASE/chat -H 'Content-Type: application/json' \
+  -d '{"session_id":"demo-1","message":"What is the capital of France?"}'
+# also LLM_CACHE, even though demo-1 now has history
 ```
 
 **Failover** — make key_1 fail inside one request:
@@ -257,13 +268,13 @@ fetch(`${API}/chat`, {method:"POST", headers:{"Content-Type":"application/json",
   and the all-keys-down 503 can be shown without curl.
 - **"New chat" button:** makes session separation visible (a
   new `session_id` is generated per page load, as the contract requires) and
-  lets you demo cache hits (new session + same first message) in one click.
+  lets you demo cache hits (ask a question again, here or in a new chat) in one click.
 - **Key cooldown across requests:** keys that genuinely fail (429/5xx) are
   benched for `KEY_COOLDOWN_SECONDS` so healthy keys answer first — real
   resilience beyond per-request fallback.
 - **Failure simulation bypasses the cache** (explained above) so failover demos
   are deterministic even for previously-asked questions.
-- **45-test backend suite** that exercises the real LiteLLM path against a
+- **48-test backend suite** that exercises the real LiteLLM path against a
   local OpenAI-compatible stub server (real 429/5xx responses, real cache
   read/write) — no API keys required in CI.
 - **CI workflow** (`.github/workflows/tests.yml`) running the backend suite on
@@ -283,7 +294,7 @@ backend/
     db.py        # SQLite schema + history/sessions persistence
     routes.py    # /health, /chat, /sessions/{id}/messages
     schemas.py   # request/response models (exact API contract)
-  tests/         # 45 pytest tests incl. OpenAI-compatible stub LLM
+  tests/         # 48 pytest tests incl. OpenAI-compatible stub LLM
   Dockerfile     # multi-stage, non-root, healthcheck
 frontend/
   src/           # React (Vite + TS) chat UI with data-testid contract

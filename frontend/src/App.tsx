@@ -136,7 +136,10 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [online, setOnline] = useState<boolean | null>(null);
-  const [panelOpen, setPanelOpen] = useState(false);
+  // Open by default on wide screens (side column), closed on narrow ones (overlay).
+  const [panelOpen, setPanelOpen] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 961px)").matches
+  );
 
   const nextId = useRef(1);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -157,6 +160,15 @@ export default function App() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onEsc = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setPanelOpen(false);
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [panelOpen]);
 
   useEffect(() => {
     if (messages.length || pending) endRef.current?.scrollIntoView({ block: "end" });
@@ -269,14 +281,14 @@ export default function App() {
           aria-controls="inspector"
           onClick={() => setPanelOpen((o) => !o)}
         >
-          {panelOpen ? "Close details" : "Details"}
+          {panelOpen ? "Hide details" : "Details"}
         </button>
         <button type="button" className="btn btn--secondary" onClick={startNewSession}>
           New chat
         </button>
       </header>
 
-      <div className="workspace">
+      <div className={`workspace ${panelOpen ? "" : "panel-closed"}`}>
         <main className="chat">
           <div className="thread" aria-live="polite">
             {messages.length === 0 && !pending && (
@@ -284,8 +296,8 @@ export default function App() {
                 <h1>Chat with the model behind a two-key gateway</h1>
                 <p>
                   Each reply lists where it came from, the model, the server latency and the
-                  tokens for that request. Send the same first message in a new chat to get it
-                  from the cache.
+                  tokens for that request. Ask a question again, in this chat or a new one, and
+                  the answer comes from the cache.
                 </p>
                 <ul className="starters">
                   {STARTERS.map((s) => (
@@ -413,6 +425,21 @@ export default function App() {
           className={`inspector ${panelOpen ? "is-open" : ""}`}
           aria-label="Request details"
         >
+          <div className="inspector__head">
+            <h2 className="inspector__title">Details</h2>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Close details panel"
+              title="Close (Esc)"
+              onClick={() => setPanelOpen(false)}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+              </svg>
+            </button>
+          </div>
+
           <section className="block">
             <h2>Request</h2>
             {selected ? (

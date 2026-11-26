@@ -30,9 +30,44 @@ def test_different_message_never_comes_from_cache(make_app):
     r = c.post("/chat", json={"session_id": "s-b", "message": "What is the capital of Japan?"}).json()
     assert r["metadata"]["resolution_source"] == "LIVE_INFERENCE"
     assert r["reply"] != ""
-    # And the follow-up in the same session has different history -> live.
-    r2 = c.post("/chat", json={"session_id": "s-a", "message": QUESTION}).json()
-    assert r2["metadata"]["resolution_source"] == "LIVE_INFERENCE"
+
+
+def test_repeated_question_in_same_session_is_cache_hit(make_app):
+    """The cache key is the question (plus model and system prompt), not the
+    whole history: asking again later in the same session hits the cache."""
+    c, stub, _ = make_app()
+    first = c.post("/chat", json={"session_id": "s-a", "message": QUESTION}).json()
+    c.post("/chat", json={"session_id": "s-a", "message": "Tell me a joke."})
+    calls_before = len(stub.requests)
+
+    again = c.post("/chat", json={"session_id": "s-a", "message": QUESTION}).json()
+    assert again["metadata"]["resolution_source"] == "LLM_CACHE"
+    assert again["metadata"]["key_id"] is None
+    assert again["reply"] == first["reply"]
+    assert len(stub.requests) == calls_before  # no LLM call was made
+
+    # A mid-session question is also cached for other sessions.
+    other = c.post("/chat", json={"session_id": "s-b", "message": "Tell me a joke."}).json()
+    assert other["metadata"]["resolution_source"] == "LLM_CACHE"
+
+
+def test_cache_ignores_case_whitespace_and_trailing_punctuation(make_app):
+    c, _, _ = make_app()
+    c.post("/chat", json={"session_id": "s-a", "message": QUESTION})
+    r = c.post(
+        "/chat", json={"session_id": "s-b", "message": "  what is the   capital of france  "}
+    ).json()
+    assert r["metadata"]["resolution_source"] == "LLM_CACHE"
+
+
+def test_different_system_prompt_is_a_different_cache_entry(make_app):
+    c, _, _ = make_app()
+    c.post("/chat", json={"session_id": "s-a", "message": QUESTION})
+    r = c.post(
+        "/chat",
+        json={"session_id": "s-b", "message": QUESTION, "system_prompt": "Answer like a pirate."},
+    ).json()
+    assert r["metadata"]["resolution_source"] == "LIVE_INFERENCE"
 
 
 def test_cache_hit_is_faster_than_live(make_app):
@@ -135,10 +170,11 @@ def test_simulated_failure_of_unknown_key_is_ignored(make_app):
 
 def test_malformed_or_unsupported_header_values_are_ignored(make_app):
     c, _, _ = make_app()
-    for value in ("key_1=abc", "key_1=404", "garbage", "key_1"):
+    for i, value in enumerate(("key_1=abc", "key_1=404", "garbage", "key_1")):
+        # Distinct messages: an ignored header means the cache is in play.
         resp = c.post(
             "/chat",
-            json={"session_id": "s-1", "message": "hello"},
+            json={"session_id": "s-1", "message": f"hello {i}"},
             headers={"X-Simulate-Failure": value},
         )
         assert resp.status_code == 200
